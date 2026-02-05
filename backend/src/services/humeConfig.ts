@@ -13,13 +13,21 @@ const getClient = () => {
     throw new Error("HUME_API_KEY is not defined in environment variables");
   }
 
-  return axios.create({
+  const client = axios.create({
     baseURL: HUME_API_BASE,
     headers: {
       "X-Hume-Api-Key": apiKey,
       "Content-Type": "application/json",
     },
   });
+
+  // Log outgoing requests for debugging
+  client.interceptors.request.use((config) => {
+    console.log(`🚀 Outgoing Request: ${config.method?.toUpperCase()} ${config.url}`, config.data);
+    return config;
+  });
+
+  return client;
 };
 
 export const createConfig = async (configData: any) => {
@@ -73,10 +81,17 @@ export const deleteConfig = async (id: string) => {
 const handleError = (error: any) => {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError;
-    console.error("Hume Config API Error:", axiosError.response?.data || axiosError.message);
+    // Log full error details for debugging
+    console.error("Hume Config API Error Details:", {
+        status: axiosError.response?.status,
+        statusText: axiosError.response?.statusText,
+        data: axiosError.response?.data,
+        message: axiosError.message
+    });
+    
     throw {
       code: axiosError.response?.status || 500,
-      message: axiosError.response?.statusText || "Hume API Error",
+      message: axiosError.response?.statusText || axiosError.message || "Hume API Error",
       details: axiosError.response?.data,
     };
   }

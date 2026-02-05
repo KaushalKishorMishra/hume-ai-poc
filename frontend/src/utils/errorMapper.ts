@@ -5,6 +5,7 @@ export interface AppError {
 }
 
 export const mapVoiceError = (error: any): AppError => {
+  console.error("Voice SDK Error Caught:", error); // Added logging
   const errMsg = error?.message?.toLowerCase() || "";
 
   // 1. Microphone / Permissions

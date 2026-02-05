@@ -3,13 +3,18 @@ import { useVoice, VoiceReadyState } from "@humeai/voice-react";
 import { Mic, MicOff, Loader2 } from "lucide-react";
 import { mapVoiceError, AppError } from "../utils/errorMapper";
 
-export const VoiceChat = ({ onError }: { onError: (err: AppError) => void }) => {
+interface VoiceChatProps {
+  onError: (err: AppError) => void;
+  accessToken: string;
+  configId: string;
+}
+
+export const VoiceChat = ({ onError, accessToken, configId }: VoiceChatProps) => {
   const { connect, disconnect, readyState, isPlaying, messages, error } = useVoice();
 
   // Watch for SDK internal errors and map them
   useEffect(() => {
     if (error) {
-        // @ts-ignore - The SDK error type might be generic
         onError(mapVoiceError(error));
     }
   }, [error, onError]);
@@ -25,8 +30,12 @@ export const VoiceChat = ({ onError }: { onError: (err: AppError) => void }) => 
     if (isConnected) {
       disconnect();
     } else {
-      // Connect to EVI
-      connect()
+      // Connect to EVI with required session parameters
+      connect({
+        auth: { type: "accessToken", value: accessToken },
+        configId: configId,
+        hostname: "api.hume.ai"
+      })
         .then(() => console.log("Session Started"))
         .catch((err) => {
           console.error("Connect Failure:", err);
