@@ -16,3 +16,16 @@ export const setupSession = async (): Promise<SessionSetup> => {
     throw new Error(error.response?.data?.error || "Failed to setup session");
   }
 };
+
+export const saveSession = async (chatGroupId: string, transcript: any[]) => {
+  try {
+    const response = await axios.post(`${BACKEND_URL}/api/session/record`, {
+      chatGroupId,
+      transcript
+    });
+    return response.data;
+  } catch (error: any) {
+    console.error("Failed to save session:", error);
+    // Don't throw, just log. It's post-session cleanup.
+  }
+};

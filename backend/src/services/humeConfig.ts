@@ -3,15 +3,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// Base URL for Hume EVI API
-const HUME_API_BASE = "https://api.hume.ai/v0/evi/configs";
+const HUME_API_BASE = "https://api.hume.ai/v0/evi";
 
-// Helper to get configured Axios instance
 const getClient = () => {
   const apiKey = process.env.HUME_API_KEY;
-  if (!apiKey) {
-    throw new Error("HUME_API_KEY is not defined in environment variables");
-  }
+  if (!apiKey) throw new Error("HUME_API_KEY is not defined");
 
   const client = axios.create({
     baseURL: HUME_API_BASE,
@@ -21,77 +17,76 @@ const getClient = () => {
     },
   });
 
-  // Log outgoing requests for debugging
   client.interceptors.request.use((config) => {
-    console.log(`🚀 Outgoing Request: ${config.method?.toUpperCase()} ${config.url}`, config.data);
+    const fullUrl = `${config.baseURL}${config.url?.startsWith("/") ? "" : "/"}${config.url}`;
+    console.log(`🚀 [Hume API] ${config.method?.toUpperCase()} ${fullUrl}`, config.data || "");
     return config;
   });
 
   return client;
 };
 
-export const createConfig = async (configData: any) => {
-  try {
-    const response = await getClient().post("", configData);
-    return response.data;
-  } catch (error) {
-    handleError(error);
-  }
-};
+// --- Configs ---
 
-export const listConfigs = async (params?: any) => {
-  try {
-    const response = await getClient().get("", { params });
-    return response.data;
-  } catch (error) {
-    handleError(error);
-  }
-};
+export const createConfig = (data: any) => getClient().post("/configs", data).then(r => r.data).catch(handleError);
+export const listConfigs = (params?: any) => getClient().get("/configs", { params }).then(r => r.data).catch(handleError);
+export const getConfig = (id: string) => getClient().get(`/configs/${id}`).then(r => r.data).catch(handleError);
+export const deleteConfig = (id: string) => getClient().delete(`/configs/${id}`).then(r => r.data).catch(handleError);
+export const updateConfig = (id: string, data: any) => getClient().patch(`/configs/${id}`, data).then(r => r.data).catch(handleError);
+export const updateConfigName = (id: string, name: string) => getClient().patch(`/configs/${id}`, { name }).then(r => r.data).catch(handleError);
 
-export const getConfig = async (id: string) => {
-  try {
-    const response = await getClient().get(`/${id}`);
-    return response.data;
-  } catch (error) {
-    handleError(error);
-  }
-};
+// Config Versions
+export const listConfigVersions = (id: string, params?: any) => getClient().get(`/configs/${id}`, { params }).then(r => r.data).catch(handleError);
+export const createConfigVersion = (id: string, data: any) => getClient().post(`/configs/${id}`, data).then(r => r.data).catch(handleError);
+export const getConfigVersion = (id: string, version: number) => getClient().get(`/configs/${id}/version/${version}`).then(r => r.data).catch(handleError);
+export const updateConfigDescription = (id: string, version: number, description: string) => 
+    getClient().patch(`/configs/${id}/version/${version}`, { version_description: description }).then(r => r.data).catch(handleError);
+export const deleteConfigVersion = (id: string, version: number) => getClient().delete(`/configs/${id}/version/${version}`).then(r => r.data).catch(handleError);
 
-export const updateConfig = async (id: string, configData: any) => {
-  try {
-    // EVI Configs usually support PATCH for partial updates or PUT for replacement.
-    // Using PATCH as it's safer for partials, but standard might be different.
-    // If specific fields are needed, they can be passed in configData.
-    const response = await getClient().patch(`/${id}`, configData);
-    return response.data;
-  } catch (error) {
-    handleError(error);
-  }
-};
 
-export const deleteConfig = async (id: string) => {
-  try {
-    const response = await getClient().delete(`/${id}`);
-    return response.data;
-  } catch (error) {
-    handleError(error);
-  }
-};
+// --- Prompts ---
+
+export const createPrompt = (data: any) => getClient().post("/prompts", data).then(r => r.data).catch(handleError);
+export const listPrompts = (params?: any) => getClient().get("/prompts", { params }).then(r => r.data).catch(handleError);
+export const deletePrompt = (id: string) => getClient().delete(`/prompts/${id}`).then(r => r.data).catch(handleError);
+export const updatePromptName = (id: string, name: string) => getClient().patch(`/prompts/${id}`, { name }).then(r => r.data).catch(handleError);
+
+// Prompt Versions
+export const listPromptVersions = (id: string, params?: any) => getClient().get(`/prompts/${id}`, { params }).then(r => r.data).catch(handleError);
+export const createPromptVersion = (id: string, data: any) => getClient().post(`/prompts/${id}`, data).then(r => r.data).catch(handleError);
+export const getPromptVersion = (id: string, version: number) => getClient().get(`/prompts/${id}/version/${version}`).then(r => r.data).catch(handleError);
+export const updatePromptDescription = (id: string, version: number, description: string) => 
+    getClient().patch(`/prompts/${id}/version/${version}`, { version_description: description }).then(r => r.data).catch(handleError);
+export const deletePromptVersion = (id: string, version: number) => getClient().delete(`/prompts/${id}/version/${version}`).then(r => r.data).catch(handleError);
+
+
+// --- Tools ---
+
+export const createTool = (data: any) => getClient().post("/tools", data).then(r => r.data).catch(handleError);
+export const listTools = (params?: any) => getClient().get("/tools", { params }).then(r => r.data).catch(handleError);
+export const deleteTool = (id: string) => getClient().delete(`/tools/${id}`).then(r => r.data).catch(handleError);
+export const updateToolName = (id: string, name: string) => getClient().patch(`/tools/${id}`, { name }).then(r => r.data).catch(handleError);
+
+// Tool Versions
+export const listToolVersions = (id: string, params?: any) => getClient().get(`/tools/${id}`, { params }).then(r => r.data).catch(handleError);
+export const createToolVersion = (id: string, data: any) => getClient().post(`/tools/${id}`, data).then(r => r.data).catch(handleError);
+export const getToolVersion = (id: string, version: number) => getClient().get(`/tools/${id}/version/${version}`).then(r => r.data).catch(handleError);
+export const updateToolDescription = (id: string, version: number, description: string) => 
+    getClient().patch(`/tools/${id}/version/${version}`, { version_description: description }).then(r => r.data).catch(handleError);
+export const deleteToolVersion = (id: string, version: number) => getClient().delete(`/tools/${id}/version/${version}`).then(r => r.data).catch(handleError);
+
+
+// --- Chats ---
+
+export const listChatGroups = (params?: any) => getClient().get("/chat_groups", { params }).then(r => r.data).catch(handleError);
+
 
 const handleError = (error: any) => {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError;
-    // Log full error details for debugging
-    console.error("Hume Config API Error Details:", {
-        status: axiosError.response?.status,
-        statusText: axiosError.response?.statusText,
-        data: axiosError.response?.data,
-        message: axiosError.message
-    });
-    
     throw {
       code: axiosError.response?.status || 500,
-      message: axiosError.response?.statusText || axiosError.message || "Hume API Error",
+      message: axiosError.response?.statusText || axiosError.message,
       details: axiosError.response?.data,
     };
   }
