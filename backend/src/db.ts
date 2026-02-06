@@ -40,14 +40,63 @@ export const setConfigId = async (id: string) => {
   await db.run('INSERT OR REPLACE INTO configs (key, value) VALUES (?, ?)', 'hume_config_id', id);
 };
 
-export const saveInterview = async (chatGroupId: string, transcript: any) => {
+export interface InterviewRecord {
+  chatGroupId: string;
+  transcript: unknown[];
+  status: 'COMPLETED' | 'ERROR';
+  disconnectReason: string | null;
+  totalQuestions: number;
+  durationMs: number;
+  errorReason?: string;
+}
+
+export const saveInterview = async (record: InterviewRecord) => {
   const db = await getDb();
+  
+  // Check if we need to add new columns (migration)
+  const tableInfo = await db.all("PRAGMA table_info(interviews)");
+  const columns = tableInfo.map((col: { name: string }) => col.name);
+  
+  if (!columns.includes('status')) {
+    await db.exec(`ALTER TABLE interviews ADD COLUMN status TEXT DEFAULT 'COMPLETED'`);
+    await db.exec(`ALTER TABLE interviews ADD COLUMN disconnect_reason TEXT`);
+    await db.exec(`ALTER TABLE interviews ADD COLUMN questions_answered INTEGER DEFAULT 0`);
+    await db.exec(`ALTER TABLE interviews ADD COLUMN total_questions INTEGER DEFAULT 0`);
+    await db.exec(`ALTER TABLE interviews ADD COLUMN duration_ms INTEGER DEFAULT 0`);
+    await db.exec(`ALTER TABLE interviews ADD COLUMN error_reason TEXT`);
+  }
+  
   await db.run(
-    'INSERT INTO interviews (chat_group_id, transcript) VALUES (?, ?)',
-    chatGroupId,
-    JSON.stringify(transcript)
+    `INSERT INTO interviews 
+     (chat_group_id, transcript, status, disconnect_reason, total_questions, duration_ms, error_reason) 
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    record.chatGroupId,
+    JSON.stringify(record.transcript),
+    record.status,
+    record.disconnectReason,
+    record.totalQuestions,
+    record.durationMs,
+    record.errorReason || null
   );
-  console.log(`💾 Saved interview for chat group: ${chatGroupId}`);
+  
+  const statusEmoji = record.status === 'COMPLETED' ? '✅' : '❌';
+  console.log(
+    `${statusEmoji} Saved interview: ${record.chatGroupId} | Status: ${record.status} | ` +
+    `Duration: ${Math.round(record.durationMs / 1000)}s | ` +
+    `Reason: ${record.disconnectReason || 'N/A'}`
+  );
+};
+
+// Legacy support - simple save
+export const saveInterviewSimple = async (chatGroupId: string, transcript: unknown) => {
+  await saveInterview({
+    chatGroupId,
+    transcript: Array.isArray(transcript) ? transcript : [],
+    status: 'COMPLETED',
+    disconnectReason: 'completed',
+    totalQuestions: 0,
+    durationMs: 0,
+  });
 };
 
 export const getInterviews = async () => {

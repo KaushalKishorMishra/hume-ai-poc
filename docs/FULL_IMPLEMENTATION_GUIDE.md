@@ -1,6 +1,8 @@
 # Hume AI - Complete Full-Stack Implementation Guide
 
-A comprehensive, production-ready implementation of Hume AI with both frontend (React) and backend (Node.js/Express) code.
+> ⚠️ **Note:** This is a **general reference guide** for Hume AI full-stack integration. For the specific Interviewer Bot PoC implementation in this project, see the [main project README](../README.md) and [Implementation Guide](./IMPLEMENTATION_GUIDE.md).
+
+A comprehensive, production-ready implementation guide for Hume AI with both frontend (React) and backend (Node.js/Express) code.
 
 **Timeline:** 12-15 days
 **Complexity:** Intermediate

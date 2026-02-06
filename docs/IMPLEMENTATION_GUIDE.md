@@ -1,781 +1,523 @@
-# Hume AI Integration - Master Implementation Guide
+# Hume AI Interviewer Bot - Implementation Guide
 
-A comprehensive guide for integrating Hume AI TypeScript SDK into your application.
-
-**Source Documentation:** [cop-usage](./cop-usage/README.md)
-**Estimated Timeline:** 12-15 days (with AI assistance)
-**Complexity:** Intermediate to Advanced
+A step-by-step guide for understanding and extending the Hume AI Interviewer Bot PoC.
 
 ---
 
 ## Table of Contents
 
-1. [Quick Start (30 Minutes)](#quick-start-30-minutes)
-2. [Architecture Overview](#architecture-overview)
-3. [Phase 1: Foundation Setup](#phase-1-foundation-setup-days-1-3)
-4. [Phase 2: Secure Webhooks](#phase-2-secure-webhooks-days-4-6)
-5. [Phase 3: Speech-to-Speech](#phase-3-speech-to-speech-days-7-9)
-6. [Phase 4: Production Deployment](#phase-4-production-deployment-days-10-12)
-7. [Security Best Practices](#security-best-practices)
-8. [Troubleshooting](#troubleshooting)
-9. [External Resources](#external-resources)
+1. [Overview](#overview)
+2. [Backend Implementation](#backend-implementation)
+3. [Frontend Implementation](#frontend-implementation)
+4. [State Management](#state-management)
+5. [Error Handling](#error-handling)
+6. [Concurrent Session Management](#concurrent-session-management)
+7. [Extending the Project](#extending-the-project)
 
 ---
 
-## Quick Start (30 Minutes)
+## Overview
 
-Get a basic Hume AI integration running locally in 30 minutes.
+### How It Works
 
-### Prerequisites
-- Node.js 16+
-- npm or yarn
-- A Hume AI API key ([Get one here](https://dev.hume.ai))
+1. **Session Setup**: Frontend requests access token from backend
+2. **Capacity Check**: Frontend verifies session slots are available
+3. **WebSocket Connection**: Frontend connects to Hume EVI with questions
+4. **Interview Flow**: Bot asks questions, user responds, progress is tracked
+5. **Completion**: Interview ends (normally or early), data is saved
 
-### Step 1: Install Dependencies (2 minutes)
+### Tech Stack
 
-```bash
-npm install hume axios express dotenv cors
-npm install -D typescript @types/express ts-node nodemon
-```
-
-### Step 2: Environment Setup (3 minutes)
-
-Create `.env`:
-```bash
-HUME_API_KEY=your_api_key_here
-HUME_CONFIG_ID=your_config_id
-PORT=3001
-NODE_ENV=development
-```
-
-### Step 3: Basic Server (10 minutes)
-
-Create `src/index.ts`:
-```typescript
-import express from 'express';
-import dotenv from 'dotenv';
-import Hume from 'hume';
-import cors from 'cors';
-
-dotenv.config();
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Initialize Hume client
-const humeClient = new Hume({
-  apiKey: process.env.HUME_API_KEY!,
-});
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'hume-ai-integration' });
-});
-
-// Create chat endpoint
-app.post('/api/chat/create', async (req, res) => {
-  try {
-    const chat = await humeClient.empathicVoice.chats.create({
-      configId: process.env.HUME_CONFIG_ID!,
-    });
-    res.json({ chatId: chat.id, status: 'created' });
-  } catch (error) {
-    console.error('Failed to create chat:', error);
-    res.status(500).json({ error: 'Failed to create chat' });
-  }
-});
-
-// Send message endpoint
-app.post('/api/chat/send', async (req, res) => {
-  try {
-    const { chatId, message } = req.body;
-
-    const response = await humeClient.empathicVoice.chat(
-      chatId
-    ).sendMessage({
-      type: 'user_input',
-      text: message,
-    });
-
-    res.json({
-      message: response,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Failed to send message:', error);
-    res.status(500).json({ error: 'Failed to send message' });
-  }
-});
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-```
-
-### Step 4: Test (5 minutes)
-
-```bash
-# Start server
-npx ts-node src/index.ts
-
-# Test in another terminal
-curl -X POST http://localhost:3001/api/chat/create
-curl -X POST http://localhost:3001/api/chat/send \
-  -H "Content-Type: application/json" \
-  -d '{"chatId": "your-chat-id", "message": "Hello!"}'
-```
-
-### Step 5: Next Steps
-
-- Move to [Phase 1: Foundation Setup](#phase-1-foundation-setup-days-1-3) for full implementation
-- See [Backend Implementation Details](./cop-usage/BACKEND_IMPLEMENTATION.md) for complete structure
-- See [Code Examples](./cop-usage/CODE_EXAMPLES.md) for more endpoints
+| Component | Technology |
+|-----------|------------|
+| Frontend  | React 18 + TypeScript + Vite + Tailwind CSS |
+| Backend   | Node.js + Express + TypeScript |
+| Database  | SQLite (via better-sqlite3) |
+| Voice SDK | @humeai/voice-react |
+| Auth      | OAuth2 Client Credentials (server-side) |
 
 ---
 
-## Architecture Overview
+## Backend Implementation
+
+### Project Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           CLIENT LAYER                                   │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐          │
-│  │   React App     │  │   Web Audio API │  │   Speech Recog  │          │
-│  │   (Frontend)    │  │   (Microphone)  │  │   (STT/TTS)     │          │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘          │
-└───────────┼────────────────────┼────────────────────┼──────────────────┘
-            │                    │                    │
-            ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          API LAYER (Express)                             │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │  Middleware: Auth, Rate Limiting, Error Handling, Logging       │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐   │
-│  │ /api/chat    │ │ /api/speech  │ │ /api/webhooks│ │ /api/config  │   │
-│  │   Routes     │ │   Routes     │ │   Routes     │ │   Routes     │   │
-│  └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘   │
-└─────────┼────────────────┼────────────────┼────────────────┼──────────┘
-          │                │                │                │
-          ▼                ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        SERVICE LAYER                                     │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
-│  │  ChatService     │  │  SpeechService   │  │  WebhookService  │       │
-│  │  - createChat    │  │  - transcribe    │  │  - verifySig     │       │
-│  │  - sendMessage   │  │  - synthesize    │  │  - handleEvent   │       │
-│  │  - endChat       │  │  - processAudio  │  │  - retryLogic    │       │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘       │
-└───────────┼─────────────────────┼─────────────────────┼────────────────┘
-            │                     │                     │
-            ▼                     ▼                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     EXTERNAL SERVICES                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │   Hume AI    │  │  Google Cloud│  │   Database   │  │   Webhook    │ │
-│  │   API        │  │  (STT/TTS)   │  │ (PostgreSQL) │  │   Delivery   │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**Key Design Principles:**
-1. **Backend-Proxy Pattern** - API key never exposed to frontend
-2. **Service Layer** - Business logic isolated from HTTP layer
-3. **Webhook Security** - Signed URLs with HMAC verification
-4. **State Persistence** - Chat history stored in PostgreSQL
-
----
-
-## Phase 1: Foundation Setup (Days 1-3)
-
-### Day 1: Project Structure & Configuration
-
-**Directory Structure:**
-```
-project/
+backend/
 ├── src/
-│   ├── config/
-│   │   ├── env.ts              # Environment variables
-│   │   ├── database.ts         # DB connection
-│   │   └── hume.ts             # Hume client setup
-│   ├── services/
-│   │   ├── chatService.ts      # Chat business logic
-│   │   └── expressionService.ts # Expression analysis
+│   ├── server.ts              # Main Express server
+│   ├── db.ts                  # SQLite database operations
 │   ├── routes/
-│   │   ├── chat.routes.ts      # Chat endpoints
-│   │   └── health.routes.ts    # Health checks
-│   ├── middleware/
-│   │   ├── auth.ts             # JWT authentication
-│   │   ├── errorHandler.ts     # Global error handling
-│   │   └── logger.ts           # Request logging
-│   ├── models/
-│   │   ├── Chat.ts             # Chat model
-│   │   └── Message.ts          # Message model
-│   ├── utils/
-│   │   └── helpers.ts          # Utility functions
-│   └── index.ts                # Entry point
-├── tests/
-├── .env
-├── .env.example
+│   │   └── hume.ts            # Hume config management API
+│   ├── services/
+│   │   ├── humeAuth.ts        # OAuth2 token exchange
+│   │   ├── humeConfig.ts      # EVI config CRUD operations
+│   │   └── sessionManager.ts  # Concurrent session tracking
+│   └── types/
+│       └── hume.ts            # TypeScript interfaces
 ├── package.json
 └── tsconfig.json
 ```
 
-**Configuration Files:**
+### Key Files
 
-See [BACKEND_IMPLEMENTATION.md](./cop-usage/BACKEND_IMPLEMENTATION.md) for complete:
-- `src/config/env.ts` - Environment validation
-- `src/config/hume.ts` - Client initialization
-- `src/config/database.ts` - PostgreSQL setup
+#### `server.ts` - Main Application
 
-### Day 2: Chat Service Implementation
-
-**Core Chat Service** (`src/services/chatService.ts`):
+The Express server with all endpoints:
 
 ```typescript
-import Hume from 'hume';
-import { query } from '../config/database';
+// Session setup - returns access token and config ID
+app.post("/api/session/setup", async (req, res) => {
+  // 1. Check/create EVI config on Hume
+  // 2. Get OAuth2 access token
+  // 3. Return { accessToken, configId }
+});
 
-export class ChatService {
-  private client: Hume;
+// Capacity check - can we start new sessions?
+app.get("/api/session/capacity", (req, res) => {
+  const capacity = sessionManager.getCapacity();
+  res.json(capacity);
+});
 
-  constructor(apiKey: string) {
-    this.client = new Hume({ apiKey });
+// Start session - reserve a slot
+app.post("/api/session/start", (req, res) => {
+  const { sessionId, totalQuestions } = req.body;
+  const success = sessionManager.startSession(sessionId, totalQuestions);
+  // Returns success or 429 if limit reached
+});
+
+// Record interview - save with full metadata
+app.post("/api/session/record", async (req, res) => {
+  const { chatGroupId, transcript, status, disconnectReason, ... } = req.body;
+  await saveInterview(record);
+});
+```
+
+#### `sessionManager.ts` - Concurrency Control
+
+```typescript
+class SessionManager {
+  private sessions: Map<string, ActiveSession> = new Map();
+  private maxConcurrent = 5; // From env
+
+  getCapacity() {
+    return {
+      allowed: this.sessions.size < this.maxConcurrent,
+      activeCount: this.sessions.size,
+      limit: this.maxConcurrent
+    };
   }
 
-  async createChat(configId: string, userId: string) {
-    const chat = await this.client.empathicVoice.chats.create({
-      configId,
-    });
-
-    // Persist to database
-    await query(
-      `INSERT INTO chats (chat_id, user_id, config_id, status, created_at)
-       VALUES ($1, $2, $3, $4, NOW())`,
-      [chat.id, userId, configId, 'active']
-    );
-
-    return chat;
+  startSession(sessionId: string, totalQuestions: number) {
+    if (this.sessions.size >= this.maxConcurrent) return false;
+    this.sessions.set(sessionId, { /* session details */ });
+    return true;
   }
 
-  async sendMessage(chatId: string, message: string) {
-    const response = await this.client.empathicVoice
-      .chat(chatId)
-      .sendMessage({
-        type: 'user_input',
-        text: message,
-      });
-
-    // Store interaction
-    await query(
-      `INSERT INTO messages (chat_id, role, content, created_at)
-       VALUES ($1, $2, $3, NOW())`,
-      [chatId, 'user', message]
-    );
-
-    return response;
-  }
-
-  async getChatHistory(chatId: string) {
-    const result = await query(
-      `SELECT * FROM messages
-       WHERE chat_id = $1
-       ORDER BY created_at ASC`,
-      [chatId]
-    );
-    return result.rows;
-  }
-
-  async endChat(chatId: string) {
-    await this.client.empathicVoice.chats.delete(chatId);
-
-    await query(
-      `UPDATE chats SET status = $1, ended_at = NOW() WHERE chat_id = $2`,
-      ['closed', chatId]
-    );
+  endSession(sessionId: string) {
+    this.sessions.delete(sessionId);
   }
 }
 ```
 
-**Database Schema:**
-
-```sql
--- Chats table
-CREATE TABLE chats (
-  id SERIAL PRIMARY KEY,
-  chat_id VARCHAR(255) UNIQUE NOT NULL,
-  user_id VARCHAR(255) NOT NULL,
-  config_id VARCHAR(255) NOT NULL,
-  status VARCHAR(50) DEFAULT 'active',
-  created_at TIMESTAMP DEFAULT NOW(),
-  ended_at TIMESTAMP,
-  webhook_url TEXT,
-  webhook_started_at TIMESTAMP,
-  webhook_ended_at TIMESTAMP
-);
-
--- Messages table
-CREATE TABLE messages (
-  id SERIAL PRIMARY KEY,
-  chat_id VARCHAR(255) REFERENCES chats(chat_id),
-  role VARCHAR(50) NOT NULL,
-  content TEXT NOT NULL,
-  audio_url TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Indexes
-CREATE INDEX idx_chats_user_id ON chats(user_id);
-CREATE INDEX idx_messages_chat_id ON messages(chat_id);
-```
-
-### Day 3: API Routes & Frontend Component
-
-**Express Routes** (`src/routes/chat.routes.ts`):
-
-See [HUME_AI_IMPLEMENTATION.md](./cop-usage/HUME_AI_IMPLEMENTATION.md) for complete route examples.
-
-**React Component** (`components/EmpathicVoiceChat.tsx`):
-
-See [FRONTEND_IMPLEMENTATION.md](./cop-usage/FRONTEND_IMPLEMENTATION.md) for the full chat UI component.
-
-**Key Features:**
-- Message display with timestamps
-- Audio toggle for voice responses
-- Auto-scroll to latest message
-- Error handling with toast notifications
-- Chat history loading
-
----
-
-## Phase 2: Secure Webhooks (Days 4-6)
-
-### Why Signed URLs?
-
-Webhooks without verification are vulnerable to:
-- Replay attacks
-- Spoofed requests
-- Unauthorized access
-
-**Signed URLs provide:**
-- Cryptographic proof of origin
-- Time-limited validity
-- Tamper detection
-
-### Implementation
-
-**Step 1: SignedUrlGenerator** (`src/utils/signedUrl.ts`):
+#### `db.ts` - Database Operations
 
 ```typescript
-import crypto from 'crypto';
-import { URL } from 'url';
-
-export class SignedUrlGenerator {
-  constructor(
-    private secret: string,
-    private baseUrl: string
-  ) {}
-
-  generateSignedUrl(options: {
-    path: string;
-    expiresIn?: number;
-    queryParams?: Record<string, any>;
-  }): string {
-    const { path, expiresIn = 3600, queryParams = {} } = options;
-
-    const timestamp = Math.floor(Date.now() / 1000);
-    const expiresAt = timestamp + expiresIn;
-
-    const params = {
-      ...queryParams,
-      timestamp,
-      expiresAt,
-    };
-
-    // Create signature
-    const canonical = `POST\n${path}\n${Object.keys(params)
-      .sort()
-      .map(k => `${k}=${params[k]}`)
-      .join('&')}`;
-
-    const signature = crypto
-      .createHmac('sha256', this.secret)
-      .update(canonical)
-      .digest('hex');
-
-    params.signature = signature;
-
-    // Build URL
-    const url = new URL(path, this.baseUrl);
-    Object.entries(params).forEach(([key, value]) => {
-      url.searchParams.append(key, String(value));
-    });
-
-    return url.toString();
-  }
-
-  verifySignedUrl(signedUrl: string): {
-    valid: boolean;
-    expired: boolean;
-    data?: Record<string, any>;
-  } {
-    try {
-      const url = new URL(signedUrl);
-      const params = Object.fromEntries(url.searchParams);
-
-      const signature = params.signature as string;
-      delete params.signature;
-
-      const expiresAt = parseInt(params.expiresAt as string, 10);
-      const now = Math.floor(Date.now() / 1000);
-
-      if (now > expiresAt) {
-        return { valid: false, expired: true };
-      }
-
-      // Verify signature
-      const canonical = `POST\n${url.pathname}\n${Object.keys(params)
-        .sort()
-        .map(k => `${k}=${params[k]}`)
-        .join('&')}`;
-
-      const expectedSig = crypto
-        .createHmac('sha256', this.secret)
-        .update(canonical)
-        .digest('hex');
-
-      const valid = crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(expectedSig)
-      );
-
-      return { valid, expired: false, data: params };
-    } catch {
-      return { valid: false, expired: false };
-    }
-  }
+export interface InterviewRecord {
+  chatGroupId: string;
+  transcript: unknown[];
+  status: 'COMPLETED' | 'INCOMPLETE' | 'ERROR';
+  disconnectReason: string | null;
+  questionsAnswered: number;
+  totalQuestions: number;
+  durationMs: number;
+  errorReason?: string;
 }
-```
 
-**Step 2: Webhook Routes** (`src/routes/webhooks.routes.ts`):
-
-See [WEBHOOK_SIGNED_URLS_SPEECH_TO_SPEECH.md](./cop-usage/WEBHOOK_SIGNED_URLS_SPEECH_TO_SPEECH.md) for complete implementation.
-
-**Step 3: Environment Variables:**
-
-```bash
-WEBHOOK_BASE_URL=https://yourdomain.com/api/webhooks
-WEBHOOK_SECRET=your_secure_random_string_min_32_chars
-```
-
-### Webhook Event Handling
-
-**Supported Events:**
-- `chat.started` - Chat session initiated
-- `chat.ended` - Chat session completed
-- `chat.message` - New message received
-- `chat.error` - Error occurred
-
-See [CODE_EXAMPLES.md](./cop-usage/CODE_EXAMPLES.md) for complete webhook handler examples.
-
----
-
-## Phase 3: Speech-to-Speech (Days 7-9)
-
-### Architecture
-
-```
-User Speech → MediaRecorder → Backend → Google STT → Hume AI → Google TTS → Audio Playback
-```
-
-### Frontend: Audio Recording
-
-```typescript
-// Audio recording hook
-export const useAudioRecorder = () => {
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-
-  const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
-
-    recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
-    recorder.onstop = async () => {
-      const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      // Send to backend
-      await sendAudioToBackend(audioBlob);
-      chunksRef.current = [];
-    };
-
-    recorder.start();
-    mediaRecorderRef.current = recorder;
-    setIsRecording(true);
-  };
-
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
-  };
-
-  return { isRecording, startRecording, stopRecording };
+export const saveInterview = async (record: InterviewRecord) => {
+  // Auto-migrate schema if needed
+  // Insert with all metadata
 };
 ```
 
-### Backend: Speech Processing
+---
 
-**SpeechService** (`src/services/speechService.ts`):
+## Frontend Implementation
 
-See [CODE_EXAMPLES.md](./cop-usage/CODE_EXAMPLES.md) for complete speech-to-speech service implementation.
+### Project Structure
 
-**Key Methods:**
-- `processAudioMessage()` - Full speech-to-speech pipeline
-- `transcribeAudio()` - Google Cloud STT integration
-- `synthesizeSpeech()` - Google Cloud TTS integration
+```
+frontend/
+├── src/
+│   ├── App.tsx                # Main app with loading/error UI
+│   ├── main.tsx               # Entry point
+│   ├── index.css              # Tailwind styles
+│   ├── components/
+│   │   ├── VoiceChat.tsx      # Core interview component
+│   │   └── ArchitectureView.tsx
+│   ├── hooks/
+│   │   ├── useInterviewState.ts  # State machine
+│   │   ├── useBeforeUnload.ts    # Tab close handler
+│   │   └── index.ts
+│   ├── api/
+│   │   └── session.ts         # API client
+│   ├── utils/
+│   │   └── errorMapper.ts     # Error categorization
+│   └── types/
+│       ├── index.ts           # Core types
+│       └── interview.ts       # State types
+├── package.json
+└── vite.config.ts
+```
 
-### API Endpoints
+### Key Files
+
+#### `VoiceChat.tsx` - Interview Logic
 
 ```typescript
-// Send audio message
-app.post('/api/speech-to-speech/send-audio', authenticate, upload.single('audio'), async (req, res) => {
-  const { chatId } = req.body;
-  const audioBuffer = req.file?.buffer;
+const INTERVIEW_QUESTIONS = [
+  "Tell me about your most challenging project.",
+  "How do you stay updated with the latest technology trends?",
+  "Describe a time you had to learn something very quickly.",
+];
 
-  const result = await speechService.processAudioMessage(
-    chatId,
-    audioBuffer,
-    req.file?.mimetype || 'audio/webm'
-  );
+export const VoiceChat = ({ accessToken, configId, interview, onError }) => {
+  const { state, actions, computed } = interview;
+  const { connect, disconnect, messages } = useVoice();
 
-  res.json({
-    transcription: result.transcription,
-    message: result.message,
-    audioUrl: result.audioUrl
-  });
-});
+  // Auto-start interview when connected
+  useEffect(() => {
+    if (connected && stage === READY) {
+      sendUserInput("Start the interview");
+      actions.interviewStarted();
+    }
+  }, [connected]);
+
+  // Track question progress
+  useEffect(() => {
+    // Detect when bot asks a question
+    // Detect when user answers
+    // Update progress
+  }, [messages]);
+
+  // Handle completion signal
+  useEffect(() => {
+    if (lastMessage.includes("END_INTERVIEW_SESSION")) {
+      actions.interviewCompleted();
+      disconnect();
+      saveInterviewRecord({ status: 'COMPLETED', ... });
+    }
+  }, [messages]);
+};
+```
+
+#### `useInterviewState.ts` - State Machine
+
+```typescript
+type InterviewAction =
+  | { type: 'START_INITIALIZING' }
+  | { type: 'INITIALIZATION_SUCCESS'; payload: { accessToken, configId } }
+  | { type: 'START_CONNECTING'; payload: { questions: string[] } }
+  | { type: 'CONNECTION_SUCCESS'; payload: { sessionId } }
+  | { type: 'INTERVIEW_STARTED' }
+  | { type: 'QUESTION_ASKED'; payload: { questionIndex } }
+  | { type: 'QUESTION_ANSWERED' }
+  | { type: 'INTERVIEW_COMPLETED' }
+  | { type: 'DISCONNECT'; payload: { reason, errorReason? } }
+  | { type: 'RESET' };
+
+function interviewReducer(state, action) {
+  switch (action.type) {
+    case 'QUESTION_ANSWERED':
+      return {
+        ...state,
+        questions: {
+          ...state.questions,
+          answeredCount: state.questions.answeredCount + 1,
+        },
+      };
+    // ... other cases
+  }
+}
+```
+
+#### `useBeforeUnload.ts` - Tab Close Handler
+
+```typescript
+export function useBeforeUnload(dataFn: () => BeforeUnloadData | null) {
+  const handleBeforeUnload = useCallback(() => {
+    const data = dataFn();
+    if (!data) return;
+
+    // Use sendBeacon for reliable delivery
+    navigator.sendBeacon('/api/session/record', JSON.stringify({
+      ...data,
+      status: 'INCOMPLETE',
+      disconnectReason: 'tab_closed',
+    }));
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+}
 ```
 
 ---
 
-## Phase 4: Production Deployment (Days 10-12)
+## State Management
 
-### Pre-Deployment Checklist
+### Interview Stages
 
-- [ ] HTTPS enabled on all endpoints
-- [ ] Webhook signatures verified
-- [ ] Secrets in environment variables (not code)
-- [ ] Rate limiting implemented (100 req/min)
-- [ ] Database connection pooling configured
-- [ ] Error tracking configured (Sentry)
-- [ ] Logging implemented (no secrets in logs)
-- [ ] Health check endpoint active
-- [ ] Database backups scheduled
-- [ ] Monitoring alerts configured
-
-### Security Checklist
-
-See [Security Best Practices](#security-best-practices) section below.
-
-### Docker Deployment
-
-```dockerfile
-# Dockerfile
-FROM node:18-alpine
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci --only=production
-
-COPY . .
-RUN npm run build
-
-EXPOSE 3001
-
-CMD ["node", "dist/index.js"]
+```typescript
+enum InterviewStage {
+  IDLE = 'IDLE',                  // Initial state
+  INITIALIZING = 'INITIALIZING',  // Getting credentials
+  CONNECTING = 'CONNECTING',      // WebSocket connecting
+  READY = 'READY',                // Connected, waiting to start
+  IN_PROGRESS = 'IN_PROGRESS',    // Interview active
+  COMPLETED = 'COMPLETED',        // Successfully finished
+  DISCONNECTED = 'DISCONNECTED',  // User ended early
+  ERROR = 'ERROR',                // Error occurred
+}
 ```
 
-### Environment Variables for Production
+### Question Tracking
+
+```typescript
+interface QuestionState {
+  list: string[];         // All questions
+  total: number;          // Total count
+  currentIndex: number;   // Which question is being asked (-1 = none)
+  answeredCount: number;  // How many answered
+}
+```
+
+### Loading States
+
+```typescript
+interface LoadingState {
+  isInitializing: boolean;      // Getting credentials
+  isConnecting: boolean;        // WebSocket connecting
+  isSaving: boolean;            // Saving interview
+  isCheckingCapacity: boolean;  // Checking session slots
+}
+```
+
+---
+
+## Error Handling
+
+### Error Reasons Enum
+
+```typescript
+enum ErrorReason {
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  AUTH_ERROR = 'AUTH_ERROR',
+  MICROPHONE_ERROR = 'MICROPHONE_ERROR',
+  USER_ENDED_EARLY = 'USER_ENDED_EARLY',
+  TAB_CLOSED = 'TAB_CLOSED',
+  CONCURRENT_LIMIT_EXCEEDED = 'CONCURRENT_LIMIT_EXCEEDED',
+  SERVER_ERROR = 'SERVER_ERROR',
+  SESSION_TIMEOUT = 'SESSION_TIMEOUT',
+  UNKNOWN = 'UNKNOWN',
+}
+```
+
+### Error Mapping
+
+```typescript
+export const mapVoiceError = (error): MappedError => {
+  const errMsg = error?.message?.toLowerCase() || '';
+
+  if (errMsg.includes('permission') || errMsg.includes('denied')) {
+    return {
+      type: 'Microphone',
+      reason: ErrorReason.MICROPHONE_ERROR,
+      message: 'Microphone access denied',
+      action: 'CheckSettings',
+    };
+  }
+
+  if (errMsg.includes('socket') || errMsg.includes('network')) {
+    return {
+      type: 'Network',
+      reason: ErrorReason.NETWORK_ERROR,
+      message: 'Connection lost',
+      action: 'Retry',
+    };
+  }
+
+  // ... more mappings
+};
+```
+
+---
+
+## Concurrent Session Management
+
+### How It Works
+
+1. **Capacity Check**: Before connecting, frontend checks `/api/session/capacity`
+2. **Session Start**: If allowed, frontend calls `/api/session/start`
+3. **Heartbeat**: Every 30s, frontend sends `/api/session/heartbeat`
+4. **Session End**: On disconnect, frontend calls `/api/session/end`
+5. **Cleanup**: Backend cleans stale sessions every 60s
+
+### Configuration
 
 ```bash
-NODE_ENV=production
-PORT=3001
-DATABASE_URL=postgresql://user:pass@prod-db:5432/hume_ai
-HUME_API_KEY=live_api_key_here
-HUME_CONFIG_ID=production_config_id
-JWT_SECRET=strong_random_secret_min_64_chars
-WEBHOOK_BASE_URL=https://api.yourdomain.com/api/webhooks
-WEBHOOK_SECRET=webhook_secret_min_32_chars
-LOG_LEVEL=warn
+# .env
+MAX_CONCURRENT_SESSIONS=5      # Max simultaneous interviews
+SESSION_STALE_TIMEOUT_MS=300000  # 5 minute timeout
 ```
 
 ---
 
-## Security Best Practices
+## Extending the Project
 
-### 1. API Key Protection
+### Adding New Questions
 
-**NEVER** expose the Hume API key in frontend code. Always proxy through backend.
+Edit `frontend/src/components/VoiceChat.tsx`:
 
 ```typescript
-// ❌ BAD: API key in frontend
-const client = new Hume({ apiKey: 'sk_live_...' });
-
-// ✅ GOOD: Backend proxy
-const response = await fetch('/api/chat/send', {
-  method: 'POST',
-  body: JSON.stringify({ message })
-});
+const INTERVIEW_QUESTIONS = [
+  "Your new question 1?",
+  "Your new question 2?",
+  // Add more...
+];
 ```
 
-### 2. Webhook Signature Verification
+### Changing the Interview Prompt
 
-**ALWAYS** verify webhook signatures in production:
+Edit `backend/src/server.ts`:
 
 ```typescript
-const verification = signedUrlGenerator.verifySignedUrl(fullUrl);
-if (!verification.valid) {
-  return res.status(401).json({ error: 'Invalid signature' });
+const generatePrompt = (): string => {
+  return `Your custom prompt here...
+
+Questions List:
+{{ questions_list }}
+
+...`;
+};
+```
+
+### Adding New Error Types
+
+1. Add to `frontend/src/types/interview.ts`:
+```typescript
+enum ErrorReason {
+  // ... existing
+  MY_NEW_ERROR = 'MY_NEW_ERROR',
 }
 ```
 
-### 3. HTTPS Enforcement
-
+2. Add mapping in `frontend/src/utils/errorMapper.ts`:
 ```typescript
-// Redirect HTTP to HTTPS
-if (process.env.NODE_ENV === 'production' && !req.secure) {
-  return res.redirect(301, `https://${req.headers.host}${req.url}`);
+if (errMsg.includes('my-condition')) {
+  return {
+    type: 'System',
+    reason: ErrorReason.MY_NEW_ERROR,
+    message: 'My error message',
+    action: 'Retry',
+  };
 }
 ```
 
-### 4. Rate Limiting
+### Adding New API Endpoints
 
+1. Add route in `backend/src/server.ts`:
 ```typescript
-import rateLimit from 'express-rate-limit';
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests, please try again later.'
-});
-
-app.use('/api/', limiter);
-```
-
-### 5. Input Validation
-
-```typescript
-import { z } from 'zod';
-
-const sendMessageSchema = z.object({
-  chatId: z.string().uuid(),
-  message: z.string().min(1).max(1000),
-  audioEnabled: z.boolean().optional()
-});
-
-app.post('/api/chat/send', (req, res, next) => {
-  try {
-    req.body = sendMessageSchema.parse(req.body);
-    next();
-  } catch (error) {
-    res.status(400).json({ error: 'Invalid input' });
-  }
+app.post('/api/my-endpoint', async (req, res) => {
+  // Your logic
 });
 ```
 
-### 6. Secure Logging
-
+2. Add client function in `frontend/src/api/session.ts`:
 ```typescript
-// ❌ BAD: Logging sensitive data
-logger.info('User login', { apiKey: process.env.HUME_API_KEY });
+export const myEndpoint = async (data) => {
+  return axios.post(`${BACKEND_URL}/api/my-endpoint`, data);
+};
+```
 
-// ✅ GOOD: Sanitized logging
-logger.info('Chat created', { chatId, userId, timestamp: new Date() });
+### Adding New Interview Stages
+
+1. Add stage to enum:
+```typescript
+enum InterviewStage {
+  // ... existing
+  MY_NEW_STAGE = 'MY_NEW_STAGE',
+}
+```
+
+2. Add action type and reducer case in `useInterviewState.ts`
+
+3. Handle stage in `VoiceChat.tsx` and `App.tsx`
+
+---
+
+## Testing
+
+### TypeScript Validation
+
+```bash
+cd backend && npx tsc --noEmit
+cd frontend && npx tsc --noEmit
+```
+
+### API Testing
+
+```bash
+# Health check
+curl http://localhost:3001/health
+
+# Capacity check
+curl http://localhost:3001/api/session/capacity
+
+# Session setup
+curl -X POST http://localhost:3001/api/session/setup
+
+# Active sessions
+curl http://localhost:3001/api/session/active
+
+# Reset database
+curl -X POST http://localhost:3001/api/reset
 ```
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+### "Microphone access denied"
+- Check browser permissions
+- Ensure HTTPS in production
+- Try a different browser (Chrome/Edge recommended)
 
-#### "Invalid webhook signature"
-- Ensure webhook secret is 32+ characters
-- Check secret matches exactly in `.env`
-- Verify URL hasn't expired (check `expiresAt` parameter)
+### "Connection lost"
+- Check network connectivity
+- Verify backend is running
+- Check Hume API status
 
-#### "Speech recognition not working"
-- Check browser support (Chrome/Edge recommended)
-- Ensure HTTPS in production (required for microphone)
-- Verify microphone permissions granted
+### "Session limit reached"
+- Wait for other sessions to complete
+- Increase `MAX_CONCURRENT_SESSIONS` in backend .env
+- Check `/api/session/active` for stuck sessions
 
-#### "Audio playback delayed"
-- Compress audio files before transmission
-- Implement audio streaming instead of full download
-- Use CDN for audio file hosting
-
-#### "Database connection errors"
-- Verify `DATABASE_URL` format
-- Check connection pool settings (min: 5, max: 20)
-- Ensure database server is accessible from app
-
-### Debugging Commands
-
-```bash
-# Test webhook signature generation
-curl -X POST http://localhost:3001/api/webhooks/generate-signed-url \
-  -H "Content-Type: application/json" \
-  -d '{"eventType": "chat.ended", "expiresIn": 3600}'
-
-# Test chat creation
-curl -X POST http://localhost:3001/api/chat/create \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-
-# Check database connections
-psql $DATABASE_URL -c "SELECT count(*) FROM chats;"
-```
+### "Token expired"
+- Refresh the page to get new credentials
+- Check Hume API key validity
 
 ---
 
-## External Resources
+## Additional Resources
 
-### Official Documentation
-- [Hume AI Docs](https://docs.hume.ai)
-- [TypeScript SDK GitHub](https://github.com/HumeAI/hume-typescript-sdk)
-- [API Reference](https://docs.hume.ai/api)
-
-### Related Technologies
-- [Express.js](https://expressjs.com)
-- [React](https://react.dev)
-- [PostgreSQL](https://www.postgresql.org/docs)
-- [Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API)
-- [Google Cloud Speech-to-Text](https://cloud.google.com/speech-to-text)
-- [Google Cloud Text-to-Speech](https://cloud.google.com/text-to-speech)
-
-### Source Files (Local)
-- [Complete Implementation Guide](./cop-usage/HUME_AI_IMPLEMENTATION.md)
-- [Backend Implementation](./cop-usage/BACKEND_IMPLEMENTATION.md)
-- [Frontend Implementation](./cop-usage/FRONTEND_IMPLEMENTATION.md)
-- [Webhook Security Guide](./cop-usage/WEBHOOK_SIGNED_URLS_SPEECH_TO_SPEECH.md)
-- [Code Examples](./cop-usage/CODE_EXAMPLES.md)
-- [Quick Start Guide](./cop-usage/QUICK_START_GUIDE.md)
+- [Hume AI Documentation](https://docs.hume.ai)
+- [Hume TypeScript SDK](https://github.com/HumeAI/hume-typescript-sdk)
+- [@humeai/voice-react](https://www.npmjs.com/package/@humeai/voice-react)
 
 ---
-
-## Implementation Timeline Summary
-
-| Phase | Duration | Key Deliverables |
-|-------|----------|------------------|
-| Phase 1: Foundation | 3 days | Project structure, chat service, basic UI |
-| Phase 2: Webhooks | 3 days | Signed URL generator, webhook handlers, security |
-| Phase 3: Speech | 3 days | Audio recording, STT/TTS integration |
-| Phase 4: Production | 3+ days | Testing, deployment, monitoring |
-| **TOTAL** | **12-15 days** | Full production-ready implementation |
-
----
-
-**Last Updated:** 2026-02-04
-**SDK Version:** Latest (v0.15.11+)
+**Last Updated:** 2024
 **Status:** Production Ready
+

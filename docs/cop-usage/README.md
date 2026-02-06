@@ -1,6 +1,8 @@
 # Hume AI Implementation Documentation
 
-Welcome to the comprehensive Hume AI implementation guide. This documentation covers all aspects of integrating Hume AI into your application, with special focus on webhook security and speech-to-speech functionality.
+> ⚠️ **Note:** This folder contains **general reference documentation** for Hume AI integration patterns. For the specific Interviewer Bot PoC implementation, see the [main project README](../../README.md) and [Implementation Guide](../IMPLEMENTATION_GUIDE.md).
+
+This documentation covers general aspects of integrating Hume AI into applications, with focus on webhook security and speech-to-speech functionality.
 
 ## 📚 Documentation Structure
 
@@ -287,7 +289,7 @@ For questions or issues:
 - **Last Updated:** 2024
 - **Version:** 1.0
 - **SDK Version:** Latest
-- **Status:** Production Ready
+- **Type:** Reference Documentation (General Hume AI Patterns)
 
 ## 🎓 Learning Order
 

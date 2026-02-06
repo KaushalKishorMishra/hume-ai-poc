@@ -8,7 +8,7 @@ export interface AuthResult {
   error?: {
     code: number;
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
 
@@ -57,11 +57,12 @@ export const getHumeAccessToken = async (): Promise<AuthResult> => {
     }
 
     return { accessToken };
-  } catch (err: any) {
+  } catch (err) {
     // Detailed Error Mapping
-    console.error("Hume Auth Exception:", err.response?.data || err.message);
+    const axiosError = err as { response?: { status?: number; data?: { error_description?: string } }; message?: string };
+    console.error("Hume Auth Exception:", axiosError.response?.data || axiosError.message);
 
-    const statusCode = err.response?.status;
+    const statusCode = axiosError.response?.status;
 
     if (statusCode === 401) {
       return { error: { code: 401, message: "Hume API: Invalid API Key or Secret" } };
@@ -75,7 +76,7 @@ export const getHumeAccessToken = async (): Promise<AuthResult> => {
       error: {
         code: statusCode || 500,
         message: "Hume API Auth Error",
-        details: err.response?.data?.error_description || err.message,
+        details: axiosError.response?.data?.error_description || axiosError.message,
       },
     };
   }
